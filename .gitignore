@@ -1,0 +1,21 @@
+# Node dependencies
+node_modules/
+
+# Prisma artifacts
+prisma/migrations/
+generated/
+
+# Build output
+dist/
+build/
+
+# Environment and secrets
+.env
+
+# Uploads
+uploads/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.log

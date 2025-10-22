@@ -1,0 +1,52 @@
+{
+  "name": "darts-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "migrate": "prisma migrate deploy",
+    "studio": "prisma studio",
+    "db:seed": "prisma db seed",
+    "seed:leadership": "ts-node prisma/seed.leadership.ts",
+    "seed:results": "ts-node prisma/seed.results.ts",
+    "seed:announcements": "ts-node prisma/seed.announcements.ts",
+    "seed:data": "pnpm -s seed:results && pnpm -s seed:announcements"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.17.1",
+  "dependencies": {
+    "@prisma/client": "6.17.0",
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "pino": "^10.0.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.7.1",
+    "nodemon": "^3.1.10",
+    "pino-pretty": "^13.1.1",
+    "prisma": "^6.17.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
