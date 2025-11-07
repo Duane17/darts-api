@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import { PrismaClient, FixtureType, FixtureStatus } from "@prisma/client";
+import { PrismaClient, FixtureType, FixtureStatus, League } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -281,9 +281,13 @@ const typeMap: Record<EventType, FixtureType> = {
   Workshop: "WORKSHOP",
 };
 
-async function main() {
-  const season = "2025";
+// Season keys for CRDL
+const SEASON_YEAR = 2025;
+const LEAGUE: League = "CRDL";
+const SEASON_LABEL = `${SEASON_YEAR} CRDL`; // keep a human friendly label if you still store season string
+const seasonIdOf = (year: number, league: League) => `${year}:${league}`;
 
+async function main() {
   // 1) Collect all team names from venue map and from fixtures
   const teamNames = new Set<string>(Object.keys(HOME_VENUE));
   for (const w of fixturesByWeek) {
@@ -320,48 +324,52 @@ async function main() {
     teamsByName[name] = team.id;
   }
 
-  // 3) Create fixtures. Week numbers are 14 to 26 in order
+  // 3) Create fixtures with season keys
   let weekNumber = 14;
   let created = 0;
 
   for (const w of fixturesByWeek) {
     for (const e of w.events) {
       const isBye = e.title.endsWith("Bye");
-      // Skip the Week 27 community info card or any event without a real home team
-      if (!e.homeTeam) continue;
+      if (!e.homeTeam) continue; // skip stray community card
 
       const homeId = teamsByName[e.homeTeam];
       const awayId = e.awayTeam && e.awayTeam !== "N/A" ? teamsByName[e.awayTeam] : undefined;
       const type = typeMap[e.type];
 
-      // Idempotent create: rely on the unique constraint with connectOrCreate-like behavior
-      // Prisma does not support connectOrCreate on unrelated unique, so we try create
-      // and if it fails because it already exists, we ignore.
       try {
         await prisma.fixture.create({
           data: {
-            season,
+            // new season keys
+            season: SEASON_LABEL,
+            seasonYear: SEASON_YEAR,
+            league: LEAGUE,
+            seasonId: seasonIdOf(SEASON_YEAR, LEAGUE),
+
+            // scheduling
             week: weekNumber,
             title: e.title,
             date: new Date(e.date),
             endDate: e.endDate ? new Date(e.endDate) : null,
             type,
+
+            // venue info
             venue: e.venue ?? "TBA",
             city: e.city ?? null,
             description: e.description ?? null,
             venueTBA: Boolean(e.venueTBA),
             kickoffTBA: Boolean(e.kickoffTBA),
-            status: "SCHEDULED",
-            isBye,
 
+            // status and teams
+            status: "SCHEDULED" as FixtureStatus,
+            isBye: isBye,
             homeTeam: { connect: { id: homeId } },
             ...(awayId ? { awayTeam: { connect: { id: awayId } } } : {}),
           },
         });
         created += 1;
       } catch (err: any) {
-        // If you re-run seeds, duplicates will hit the unique constraint
-        // We can safely ignore those
+        // ignore duplicates across re-runs
         if (String(err?.code) !== "P2002") {
           console.error("Failed to create fixture", e.id, err);
           throw err;
@@ -371,7 +379,12 @@ async function main() {
     weekNumber += 1;
   }
 
-  console.log(`Seed complete: ${Object.keys(teamsByName).length} teams upserted, ${created} fixtures created.`);
+  console.log(
+    `CRDL seed complete: ${Object.keys(teamsByName).length} teams upserted, ${created} fixtures created for season ${SEASON_LABEL} (${seasonIdOf(
+      SEASON_YEAR,
+      LEAGUE
+    )}).`
+  );
 }
 
 main()

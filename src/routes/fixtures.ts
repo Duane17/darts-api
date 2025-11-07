@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   listFixtures,
+  getFixtureById,
   createFixtureHandler,
   updateFixtureHandler,
   deleteFixtureHandler,
@@ -11,6 +12,8 @@ export const fixturesRouter = Router();
 
 // Public read
 fixturesRouter.get("/", listFixtures);
+fixturesRouter.get("/:id", getFixtureById);
+
 
 // Admin writes
 fixturesRouter.post("/", createFixtureHandler);

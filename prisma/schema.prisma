@@ -12,6 +12,11 @@ datasource db {
 //
 // Enums
 //
+enum League {
+  SRDL
+  CRDL
+}
+
 enum UserRole {
   ADMIN
   EDITOR
@@ -43,6 +48,7 @@ enum FixtureType {
   TRAINING
   COMMUNITY
   WORKSHOP
+  SRDL_LEAGUE
 }
 
 //
@@ -75,6 +81,9 @@ model Team {
 model Fixture {
   id          String        @id @default(uuid())
   season      String
+  seasonYear   Int?
+  league       League?
+  seasonId     String? 
   week        Int
   title       String
   date        DateTime
@@ -126,6 +135,9 @@ model Result {
 model Standing {
   id            String  @id @default(uuid())
   season        String
+  seasonYear   Int?
+  league       League?
+  seasonId     String? 
   teamId        String
   team          Team    @relation(fields: [teamId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
@@ -137,6 +149,7 @@ model Standing {
   goalsAgainst  Int     @default(0)
   goalDiff      Int     @default(0)
   points        Int     @default(0)
+  group         String?
   last5         String?
 
   updatedAt     DateTime @updatedAt

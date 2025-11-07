@@ -1,126 +1,267 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response } from "express";
+import { PrismaClient, FixtureType, Prisma } from "@prisma/client";
+import fs from "fs";
 import path from "path";
-import { prisma } from "../db/prisma";
-import { z } from "zod";
-import { CreateTeamDto, UpdateTeamDto, ListTeamsQuery } from "../dto/team.dto";
-import { createTeam, removeTeam, updateTeam } from "../services/teams";
+import { coerceBoolean, toSlug } from "../utils/parse";
 
+const prisma = new PrismaClient();
 
-function publicUrlFor(file?: Express.Multer.File | null): string | undefined {
-  if (!file) return undefined;
-  const filename = path.basename(file.path);
-  return `/uploads/teams/${filename}`;
+function coerceTypeFromLeague(league?: string): FixtureType | undefined {
+  if (!league) return undefined;
+  const key = league.trim().toLowerCase();
+  if (key === "srdl") return "SRDL_LEAGUE";
+  if (key === "crdl") return "SMK_TRADING_CRDL";
+  if (key === "smk" || key === "smk_trading_crdl") return "SMK_TRADING_CRDL";
+  if (key === "all") return undefined;
+  return undefined;
 }
 
-/** GET /teams - list with search and pagination */
-export async function listTeams(req: Request, res: Response, next: NextFunction) {
-  try {
-    const q = ListTeamsQuery.parse(req.query);
-    const where: any = {};
-    if (q.q) {
-      where.OR = [
-        { name: { contains: q.q, mode: "insensitive" } },
-        { city: { contains: q.q, mode: "insensitive" } },
-      ];
-    }
-    if (typeof q.active === "boolean") where.active = q.active;
+function buildTeamWhere(input: {
+  q?: string;
+  activeOnly?: string;
+  season?: string;
+  type?: FixtureType;
+  league?: string;
+}): Prisma.TeamWhereInput {
+  const where: Prisma.TeamWhereInput = {};
 
-    const skip = (q.page - 1) * q.pageSize;
-    const [items, total] = await Promise.all([
+  if (input.activeOnly?.toLowerCase() === "true") {
+    where.active = true;
+  }
+
+  if (input.q && input.q.trim().length > 0) {
+    const query = input.q.trim();
+    const insensitive = "insensitive" as const;
+    where.OR = [
+      { name: { contains: query, mode: insensitive } },
+      { city: { contains: query, mode: insensitive } },
+      { homeCity: { contains: query, mode: insensitive } },
+    ];
+  }
+
+  const resolvedType = input.type ?? coerceTypeFromLeague(input.league);
+  if (input.season && resolvedType) {
+    const season = input.season;
+    const relFilter: Prisma.TeamWhereInput = {
+      OR: [
+        { homeFixtures: { some: { season, type: resolvedType } } },
+        { awayFixtures: { some: { season, type: resolvedType } } },
+      ],
+    };
+    if (where.OR && Array.isArray(where.OR) && where.OR.length > 0) {
+      return { AND: [where, relFilter] };
+    }
+    Object.assign(where, relFilter);
+  }
+
+  return where;
+}
+
+export async function listTeams(req: Request, res: Response) {
+  try {
+    const { q, activeOnly, season, type, league, page, pageSize } = req.query as Partial<{
+      q: string;
+      activeOnly: string;
+      season: string;
+      type: FixtureType;
+      league: string;
+      page: string;
+      pageSize: string;
+    }>;
+
+    const where = buildTeamWhere({ q, activeOnly, season, type, league });
+
+    const pageNum = Math.max(1, Number.parseInt(page ?? "1", 10) || 1);
+    const sizeNum = Math.min(100, Math.max(1, Number.parseInt(pageSize ?? "20", 10) || 20));
+    const skip = (pageNum - 1) * sizeNum;
+
+    const [total, items] = await Promise.all([
+      prisma.team.count({ where }),
       prisma.team.findMany({
         where,
-        orderBy: [{ active: "desc" }, { name: "asc" }],
+        orderBy: [{ name: "asc" }],
         skip,
-        take: q.pageSize,
+        take: sizeNum,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          logoUrl: true,
+          city: true,
+          homeVenue: true,
+          homeCity: true,
+          active: true,
+          createdAt: true,
+          updatedAt: true,
+        },
       }),
-      prisma.team.count({ where }),
     ]);
 
-    res.json({
-      items,
-      page: q.page,
-      pageSize: q.pageSize,
-      total,
-      pages: Math.ceil(total / q.pageSize),
-    });
+    const pages = Math.max(1, Math.ceil(total / sizeNum));
+    res.json({ items, page: pageNum, pageSize: sizeNum, total, pages });
   } catch (err) {
-    next(err);
+    console.error("listTeams error", err);
+    res.status(500).json({ error: "Failed to list teams" });
   }
 }
 
-/** GET /teams/:id - by id */
-export async function getTeamById(req: Request, res: Response, next: NextFunction) {
+export async function getTeamById(req: Request, res: Response) {
   try {
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const team = await prisma.team.findUnique({ where: { id } });
-    if (!team) return res.status(404).json({ error: "Team not found" });
-    res.json(team);
+    const { id } = req.params;
+    const t = await prisma.team.findUnique({ where: { id } });
+    if (!t) return res.status(404).json({ error: "Not found" });
+    res.json(t);
   } catch (err) {
-    next(err);
+    console.error("getTeamById error", err);
+    res.status(500).json({ error: "Failed to load team" });
   }
 }
 
-/** GET /teams/slug/:slug - by slug */
-export async function getTeamBySlug(req: Request, res: Response, next: NextFunction) {
+export async function getTeamBySlug(req: Request, res: Response) {
   try {
-    const { slug } = z.object({ slug: z.string().min(1) }).parse(req.params);
-    const team = await prisma.team.findUnique({ where: { slug } });
-    if (!team) return res.status(404).json({ error: "Team not found" });
-    res.json(team);
+    const { slug } = req.params;
+    const t = await prisma.team.findUnique({ where: { slug } });
+    if (!t) return res.status(404).json({ error: "Not found" });
+    res.json(t);
   } catch (err) {
-    next(err);
+    console.error("getTeamBySlug error", err);
+    res.status(500).json({ error: "Failed to load team" });
   }
 }
 
-/** POST /teams - create */
-export async function createTeamHandler(req: Request, res: Response, next: NextFunction) {
+/** Build the logoUrl relative path if a file was uploaded */
+function buildLogoUrlFromFile(file?: Express.Multer.File | null): string | null {
+  if (!file) return null;
+  // Public URL matches your static mount: app.use("/uploads", express.static(UPLOAD_ROOT))
+  // We stored under uploads/teams, so expose as /uploads/teams/<filename>
+  return `/uploads/teams/${file.filename}`;
+}
+
+/** Delete a previously stored file if present */
+function safeUnlink(absPath: string) {
   try {
-    const dto = CreateTeamDto.parse(req.body);
+    if (fs.existsSync(absPath)) fs.unlinkSync(absPath);
+  } catch {
+    // ignore
+  }
+}
 
-    const logoUrlFromFile = publicUrlFor((req as any).file);
-    const team = await createTeam(prisma, {
-      ...dto,
-      logoUrl: logoUrlFromFile ?? dto.logoUrl,
-    });
+export async function createTeamHandler(req: Request, res: Response) {
+  try {
+    // If you are using multer, req.body fields are strings
+    const body = req.body as {
+      name?: string;
+      slug?: string;
+      city?: string | null;
+      homeVenue?: string | null;
+      homeCity?: string | null;
+      active?: string | boolean;
+    };
 
-    res.status(201).json(team);
-  } catch (err: any) {
-    if (err.code === "P2002") {
-      return res.status(409).json({ error: "Team with same slug already exists" });
+    const name = (body.name ?? "").trim();
+    const slug = toSlug((body.slug ?? body.name ?? "").trim());
+    const city = body.city?.trim() || null;
+    const homeVenue = body.homeVenue?.trim() || null;
+    const homeCity = (body.homeCity ?? body.city)?.trim() || null;
+    const active = coerceBoolean(body.active, true);
+
+    if (!name || !slug) {
+      return res.status(400).json({ error: "name and slug are required" });
     }
-    next(err);
-  }
-}
 
-/** PATCH /teams/:id - update */
-export async function updateTeamHandler(req: Request, res: Response, next: NextFunction) {
-  try {
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const dto = UpdateTeamDto.parse(req.body);
+    const file = req.file; // provided by upload.single("logo")
+    const logoUrl = buildLogoUrlFromFile(file);
 
-    const logoUrlFromFile = publicUrlFor((req as any).file);
-    const team = await updateTeam(prisma, id, {
-      ...dto,
-      logoUrl: logoUrlFromFile ?? dto.logoUrl,
+    const created = await prisma.team.create({
+      data: {
+        name,
+        slug,
+        city,
+        homeVenue,
+        homeCity,
+        active,
+        logoUrl, // may be null when no file uploaded
+      },
     });
 
-    res.json(team);
-  } catch (err: any) {
-    if (err.code === "P2002") return res.status(409).json({ error: "Team with same slug already exists" });
-    if (err.code === "P2025") return res.status(404).json({ error: "Team not found" });
-    next(err);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error("createTeam error", err);
+    res.status(500).json({ error: "Failed to create team" });
   }
 }
 
-/** DELETE /teams/:id - soft delete by default, use ?hard=true to force hard delete */
-export async function deleteTeamHandler(req: Request, res: Response, next: NextFunction) {
+export async function updateTeamHandler(req: Request, res: Response) {
   try {
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const { hard } = z.object({ hard: z.coerce.boolean().optional() }).parse(req.query);
-    const result = await removeTeam(prisma, id, Boolean(hard));
-    res.json(result);
-  } catch (err: any) {
-    if (err.code === "P2025") return res.status(404).json({ error: "Team not found" });
-    next(err);
+    const { id } = req.params;
+    const body = req.body as Partial<{
+      name: string;
+      slug: string;
+      city: string | null;
+      homeVenue: string | null;
+      homeCity: string | null;
+      active: string | boolean;
+    }>;
+
+    // Load current to know previous logo path if we need to delete it
+    const current = await prisma.team.findUnique({ where: { id } });
+    if (!current) return res.status(404).json({ error: "Not found" });
+
+    let nextSlug: string | undefined;
+    if (typeof body.slug === "string" && body.slug.trim()) {
+      nextSlug = toSlug(body.slug);
+    }
+
+    const patch: Prisma.TeamUpdateInput = {
+      ...(body.name ? { name: body.name.trim() } : {}),
+      ...(nextSlug ? { slug: nextSlug } : {}),
+      ...(body.city !== undefined ? { city: body.city?.trim() || null } : {}),
+      ...(body.homeVenue !== undefined ? { homeVenue: body.homeVenue?.trim() || null } : {}),
+      ...(body.homeCity !== undefined ? { homeCity: body.homeCity?.trim() || null } : {}),
+      ...(body.active !== undefined ? { active: coerceBoolean(body.active, current.active) } : {}),
+    };
+
+    // Handle new logo upload
+    const file = req.file;
+    if (file) {
+      const newLogoUrl = buildLogoUrlFromFile(file);
+      if (newLogoUrl) {
+        // delete previous file if it was under /uploads/teams
+        if (current.logoUrl && current.logoUrl.startsWith("/uploads/teams/")) {
+          const abs = path.resolve(process.cwd(), `.${current.logoUrl}`);
+          safeUnlink(abs);
+        }
+        patch.logoUrl = newLogoUrl;
+      }
+    }
+
+    const updated = await prisma.team.update({
+      where: { id },
+      data: patch,
+    });
+
+    res.json(updated);
+  } catch (err) {
+    console.error("updateTeam error", err);
+    res.status(500).json({ error: "Failed to update team" });
+  }
+}
+
+export async function deleteTeamHandler(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+
+    // Delete file on disk if we stored one
+    const current = await prisma.team.findUnique({ where: { id } });
+    if (current?.logoUrl && current.logoUrl.startsWith("/uploads/teams/")) {
+      const abs = path.resolve(process.cwd(), `.${current.logoUrl}`);
+      safeUnlink(abs);
+    }
+
+    await prisma.team.delete({ where: { id } });
+    res.status(204).send();
+  } catch (err) {
+    console.error("deleteTeam error", err);
+    res.status(500).json({ error: "Failed to delete team" });
   }
 }

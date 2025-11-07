@@ -2,7 +2,6 @@
 node_modules/
 
 # Prisma artifacts
-prisma/migrations/
 generated/
 
 # Build output

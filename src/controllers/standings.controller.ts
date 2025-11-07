@@ -1,121 +1,139 @@
-// src/controllers/standings.controller.ts
-import { Request, Response, NextFunction } from "express";
-import { z } from "zod";
-import { prisma } from "../db/prisma";
-import { RecomputeStandingDto } from "../dto/result.dto";
-import { recomputeStandings } from "../services/standings";
+import { Request, Response } from "express";
+import { PrismaClient } from "@prisma/client";
 
-// Accept season from query, tolerate arrays, allow missing to enable default resolution
-const GetStandingsQuery = z.object({
-  season: z.preprocess(v => (Array.isArray(v) ? v[0] : v), z.string().trim().min(1)).optional(),
-});
+const prisma = new PrismaClient();
 
-// Resolve the most recent season present in standings
-async function getLatestSeason(): Promise<string | null> {
-  const seasons = await prisma.standing.findMany({
-    select: { season: true },
-    distinct: ["season"],
-    orderBy: { season: "desc" },
-    take: 1,
-  });
-  return seasons[0]?.season ?? null;
-}
+/** Order by points, then goal difference, then goals for */
+const ORDER = [
+  { points: "desc" as const },
+  { goalDiff: "desc" as const },
+  { goalsFor: "desc" as const },
+];
 
-// Shape the response for UI consumption
-type StandingRowDTO = {
-  rank: number;
-  teamId: string;
-  teamName: string;
-  teamSlug: string;
-  teamLogoUrl: string | null;
-  season: string;
-  played: number;
-  won: number;
-  drawn: number;
-  lost: number;
-  goalsFor: number;
-  goalsAgainst: number;
-  goalDiff: number;
-  points: number;
-  // Provide both a string and parsed array so UI can choose either
-  last5: string | null;
-  last5Array: string[]; // e.g. ["W","W","W","L","W"]
-};
-
-export async function getStandings(req: Request, res: Response, next: NextFunction) {
+export async function getStandings(req: Request, res: Response) {
   try {
-    const parsed = GetStandingsQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Invalid query", details: parsed.error.format() });
-    }
+    const { season, group } = req.query as { season?: string; group?: string };
 
-    // Use provided season or fall back to latest available
-    const season = parsed.data?.season ?? (await getLatestSeason());
     if (!season) {
-      return res.status(404).json({
-        error: "No seasons found in standings",
-        hint: "Seed standings or recompute first",
-      });
+      return res.status(400).json({ error: "season is required" });
     }
 
-    // Ordered by your tie-breakers
     const rows = await prisma.standing.findMany({
-      where: { season },
-      include: { team: { select: { id: true, name: true, slug: true, logoUrl: true } } },
-      orderBy: [{ points: "desc" }, { goalDiff: "desc" }, { goalsFor: "desc" }],
+      where: {
+        season,
+        ...(group ? { group } : {}),
+      },
+      include: {
+        team: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            logoUrl: true, // important
+          },
+        },
+      },
+      orderBy: ORDER,
     });
 
-    if (rows.length === 0) {
-      const seasons = await prisma.standing.findMany({
-        select: { season: true },
-        distinct: ["season"],
-        orderBy: { season: "asc" },
-      });
-      return res.status(404).json({
-        error: `No standings found for season "${season}"`,
-        availableSeasons: seasons.map(s => s.season),
-        hint: "Call as /standings?season=<one-of-available-seasons>",
-      });
-    }
+    // Denormalize a top level field for convenience on the client
+    const items = rows.map((r) => ({
+      ...r,
+      teamLogoUrl: r.team?.logoUrl ?? null,
+    }));
 
-    // Compute rank and map to DTO
-    const table: StandingRowDTO[] = rows.map((r, idx) => {
-      const last5Array =
-        typeof r.last5 === "string" && r.last5.length
-          ? r.last5.split(",").map(s => s.trim()).filter(Boolean)
-          : [];
-      return {
-        rank: idx + 1,
-        teamId: r.team.id,
-        teamName: r.team.name,
-        teamSlug: r.team.slug,
-        teamLogoUrl: r.team.logoUrl ?? null,
-        season: r.season,
-        played: r.played,
-        won: r.won,
-        drawn: r.drawn,
-        lost: r.lost,
-        goalsFor: r.goalsFor,
-        goalsAgainst: r.goalsAgainst,
-        goalDiff: r.goalDiff,
-        points: r.points,
-        last5: r.last5 ?? null,
-        last5Array,
-      };
-    });
-
-    res.json(table);
+    res.json({ season, group: group ?? null, items });
   } catch (err) {
-    next(err);
+    console.error("getStandings error", err);
+    res.status(500).json({ error: "Failed to fetch standings" });
   }
 }
 
-export async function postRecomputeStandings(req: Request, res: Response, next: NextFunction) {
+/** Recompute standings for a season using the same logic as in results controller */
+export async function postRecomputeStandings(req: Request, res: Response) {
   try {
-    const dto = RecomputeStandingDto.parse(req.body);
-    await recomputeStandings(prisma, dto.season, dto.teamIds);
-    res.json({ ok: true });
+    const { season } = req.body as { season: string };
+    if (!season) return res.status(400).json({ error: "season is required" });
+
+    // Delegate to results.controller logic would be ideal if shared as a service.
+    // For simplicity, we inline a tiny re-aggregation here.
+    const fixtures = await prisma.fixture.findMany({
+      where: { season, status: "PLAYED", isBye: false },
+      select: {
+        homeTeamId: true,
+        awayTeamId: true,
+        result: { select: { homeScore: true, awayScore: true } },
+      },
+    });
+
+    type Acc = {
+      played: number; won: number; drawn: number; lost: number;
+      gf: number; ga: number; gd: number; pts: number;
+    };
+    const acc = new Map<string, Acc>();
+
+    function ensure(tid: string) {
+      if (!acc.has(tid))
+        acc.set(tid, {
+          played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0,
+        });
+      return acc.get(tid)!;
+    }
+
+    for (const f of fixtures) {
+      if (!f.result || !f.homeTeamId || !f.awayTeamId) continue;
+      const { homeScore: hs, awayScore: as } = f.result;
+
+      const h = ensure(f.homeTeamId);
+      const a = ensure(f.awayTeamId);
+
+      h.played += 1;
+      a.played += 1;
+      h.gf += hs; h.ga += as; h.gd = h.gf - h.ga;
+      a.gf += as; a.ga += hs; a.gd = a.gf - a.ga;
+
+      if (hs > as) { h.won += 1; a.lost += 1; h.pts += 3; }
+      else if (hs < as) { a.won += 1; h.lost += 1; a.pts += 3; }
+      else { h.drawn += 1; a.drawn += 1; h.pts += 1; a.pts += 1; }
+    }
+
+    const existing = await prisma.standing.findMany({
+      where: { season },
+      select: { teamId: true, group: true },
+    });
+    const groupByTeam = new Map(existing.map(s => [s.teamId, s.group ?? null]));
+
+    const ops = [];
+    for (const [teamId, s] of acc.entries()) {
+      ops.push(
+        prisma.standing.upsert({
+          where: { season_teamId: { season, teamId } },
+          update: {
+            played: s.played, won: s.won, drawn: s.drawn, lost: s.lost,
+            goalsFor: s.gf, goalsAgainst: s.ga, goalDiff: s.gd, points: s.pts,
+            group: groupByTeam.get(teamId) ?? undefined,
+          },
+          create: {
+            season, teamId,
+            played: s.played, won: s.won, drawn: s.drawn, lost: s.lost,
+            goalsFor: s.gf, goalsAgainst: s.ga, goalDiff: s.gd, points: s.pts,
+            group: groupByTeam.get(teamId) ?? undefined,
+          },
+        })
+      );
+    }
+
+    await prisma.$transaction(ops);
+
+    const rows = await prisma.standing.findMany({
+      where: { season },
+      include: { team: { select: { id: true, name: true, slug: true } } },
+      orderBy: ORDER,
+    });
+
+    res.json({ season, items: rows });
   } catch (err) {
-    next(err);
+    console.error("postRecomputeStandings error", err);
+    res.status(500).json({ error: "Failed to recompute standings" });
   }
 }
