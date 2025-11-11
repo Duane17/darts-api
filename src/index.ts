@@ -13,6 +13,8 @@ import { fixturesRouter } from "./routes/fixtures";
 import { postsRouter } from "./routes/posts";
 import { announcementsRouter } from "./routes/announcements";
 import { leadersRouter } from "./routes/leaders.routes";
+import { contentRouter } from "./routes/content";
+import { uploadsRouter } from "./routes/uploads";
 
 const app = express();
 
@@ -55,7 +57,32 @@ app.use("/fixtures", fixturesRouter);
 app.use("/posts", postsRouter);
 app.use("/announcements", announcementsRouter);
 app.use("/leaders", leadersRouter);
-app.use("/uploads", express.static(UPLOAD_ROOT));
+app.use("/uploads", uploadsRouter);
+
+app.use(
+  "/uploads",
+  express.static(UPLOAD_ROOT, {
+    dotfiles: "ignore",
+    etag: true,
+    lastModified: true,
+    maxAge: "0",
+    setHeaders: (res, filePath) => {
+      const p = filePath.replace(/\\/g, "/");
+      const isHashed = /\.[0-9a-f]{8,}\.[a-z0-9]+$/i.test(p);
+      const isStamped = /-\d{10,}\.[a-z0-9]+$/i.test(p);
+
+      if (isHashed || isStamped) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      } else {
+        res.setHeader("Cache-Control", "public, max-age=3600");
+      }
+      if (!res.getHeader("Content-Type")) {
+        res.setHeader("Content-Type", "application/octet-stream");
+      }
+    },
+  })
+);
+app.use("/content", contentRouter);
 
 
 

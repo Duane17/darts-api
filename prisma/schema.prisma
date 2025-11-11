@@ -243,3 +243,19 @@ model Leader {
   @@index([name])
   @@index([title])
 }
+
+
+// ------------- Add below your existing enums -------------
+enum PageKey {
+  HOME
+  ABOUT
+}
+
+// ------------- Add below your existing models -------------
+model SiteContent {
+  id        String   @id @default(cuid())
+  page      PageKey  @unique
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

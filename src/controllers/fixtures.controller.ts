@@ -138,8 +138,8 @@ export async function listFixtures(req: Request, res: Response) {
         where,
         orderBy: [{ week: "asc" }, { date: "asc" }],
         include: {
-          homeTeam: { select: { id: true, name: true, slug: true } },
-          awayTeam: { select: { id: true, name: true, slug: true } },
+          homeTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
+          awayTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
           ...(parseBool(includeResults) ? { result: true } : {}),
         },
         skip,
@@ -223,7 +223,7 @@ export async function createFixtureHandler(req: Request, res: Response) {
           // awayTeamId stays null for bye
         },
         include: {
-          homeTeam: { select: { id: true, name: true, slug: true } },
+          homeTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
         },
       });
       return res.status(201).json(created);
@@ -253,8 +253,8 @@ export async function createFixtureHandler(req: Request, res: Response) {
         awayTeam: { connect: { id: awayTeamId } },
       },
       include: {
-        homeTeam: { select: { id: true, name: true, slug: true} },
-        awayTeam: { select: { id: true, name: true, slug: true} },
+        homeTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
+        awayTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
       },
     });
 
@@ -336,8 +336,8 @@ export async function updateFixtureHandler(req: Request, res: Response) {
           : {}),
       },
       include: {
-        homeTeam: { select: { id: true, name: true, slug: true } },
-        awayTeam: { select: { id: true, name: true, slug: true } },
+        homeTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
+        awayTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
         result: true,
       },
     });
@@ -369,8 +369,8 @@ export async function getFixtureById(req: Request, res: Response) {
     const fx = await prisma.fixture.findUnique({
       where: { id },
       include: {
-        homeTeam: { select: { id: true, name: true, slug: true } },
-        awayTeam: { select: { id: true, name: true, slug: true } },
+        homeTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
+        awayTeam: { select: { id: true, name: true, slug: true, logoUrl: true } },
         result: true,
       },
     });

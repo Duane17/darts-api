@@ -16,7 +16,8 @@
     "seed:data": "pnpm -s seed:results && pnpm -s seed:announcements",
     "seed:srdl:teams": "ts-node prisma/seed-srdl-teams.ts",
     "seed:srdl:standings": "ts-node prisma/seed-srdl-standings.ts",
-    "seed:srdl:fixtures": "ts-node prisma/seed-srdl-fixtures.ts"
+    "seed:srdl:fixtures": "ts-node prisma/seed-srdl-fixtures.ts",
+    "seed:content": "ts-node prisma/seed-content.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
