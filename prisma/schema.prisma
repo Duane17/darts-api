@@ -245,13 +245,13 @@ model Leader {
 }
 
 
-// ------------- Add below your existing enums -------------
+
 enum PageKey {
   HOME
   ABOUT
+  ANNOUNCEMENTS
 }
 
-// ------------- Add below your existing models -------------
 model SiteContent {
   id        String   @id @default(cuid())
   page      PageKey  @unique

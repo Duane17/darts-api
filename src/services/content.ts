@@ -1,10 +1,12 @@
 import { PrismaClient, PageKey } from "@prisma/client";
-import type { HomeContent, AboutContent } from "../dto/content.dto";
+import type { HomeContent, AboutContent, AnnouncementsContent } from "../dto/content.dto";
 import {
   isHomeContent,
   isAboutContent,
+  isAnnouncementsContent,
   HomeContentSchema,
   AboutContentSchema,
+  AnnouncementsContentSchema
 } from "../dto/content.dto";
 import { toUploadWebPath } from "../utils/uploads";
 
@@ -45,6 +47,12 @@ function normalizeAboutContentPaths(data: AboutContent): AboutContent {
         bgImage: toUploadWebPath(it.bgImage),
       })),
     },
+  };
+}
+
+function normalizeAnnouncementsContentPaths(data: AnnouncementsContent): AnnouncementsContent {
+  return {
+    backgroundImage: data.backgroundImage ? toUploadWebPath(data.backgroundImage) : null,
   };
 }
 
@@ -104,6 +112,34 @@ export async function upsertAboutContent(payload: unknown): Promise<AboutContent
   });
 
   return normalized;
+}
+
+// GET
+export async function getAnnouncementsContent(): Promise<AnnouncementsContent | null> {
+  const raw = await getRawByPage(PageKey.ANNOUNCEMENTS);
+  if (raw && isAnnouncementsContent(raw)) return raw;
+  return null;
+}
+
+// PUT (upsert)
+export async function upsertAnnouncementsContent(payload: unknown): Promise<AnnouncementsContent> {
+  const parsed = AnnouncementsContentSchema.parse(payload);
+  const normalized = normalizeAnnouncementsContentPaths(parsed);
+
+  await prisma.siteContent.upsert({
+    where: { page: PageKey.ANNOUNCEMENTS },
+    update: { data: normalized },
+    create: { page: PageKey.ANNOUNCEMENTS, data: normalized },
+  });
+
+  return normalized;
+}
+
+// DELETE (remove the whole record)
+export async function deleteAnnouncementsContent(): Promise<void> {
+  await prisma.siteContent.deleteMany({
+    where: { page: PageKey.ANNOUNCEMENTS },
+  });
 }
 
 /**

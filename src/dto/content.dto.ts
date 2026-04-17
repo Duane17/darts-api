@@ -83,3 +83,19 @@ export function isAboutContent(x: unknown): x is AboutContent {
   const res = AboutContentSchema.safeParse(x);
   return res.success;
 }
+
+
+// ==================== Announcements Content ====================
+
+export type AnnouncementsContent = {
+  backgroundImage?: string | null;
+};
+
+export const AnnouncementsContentSchema = z.object({
+  backgroundImage: z.string().nullable().optional(),
+});
+
+// Type guard
+export function isAnnouncementsContent(x: unknown): x is AnnouncementsContent {
+  return AnnouncementsContentSchema.safeParse(x).success;
+}

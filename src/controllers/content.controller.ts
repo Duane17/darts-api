@@ -5,6 +5,9 @@ import {
   getSiteSettings,
   upsertHomeContent,
   upsertAboutContent,
+  getAnnouncementsContent,
+  upsertAnnouncementsContent,
+  deleteAnnouncementsContent
 } from "../services/content";
 import { ZodError } from "zod";
 
@@ -82,6 +85,46 @@ export async function putAboutContent(req: Request, res: Response, next: NextFun
         formErrors,
       });
     }
+    return next(err);
+  }
+}
+
+
+// GET /content/announcements
+export async function readAnnouncementsContent(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const content = await getAnnouncementsContent();
+    // Return 200 with empty object if nothing exists – frontend-friendly
+    return res.status(200).json(content || {});
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// PUT /content/announcements
+export async function putAnnouncementsContent(req: Request, res: Response, next: NextFunction) {
+  try {
+    const saved = await upsertAnnouncementsContent(req.body);
+    return res.status(200).json(saved);
+  } catch (err: any) {
+    if (err instanceof ZodError) {
+      const { fieldErrors, formErrors } = err.flatten();
+      return res.status(400).json({
+        error: "Invalid announcements content payload",
+        fieldErrors,
+        formErrors,
+      });
+    }
+    return next(err);
+  }
+}
+
+// DELETE /content/announcements
+export async function deleteAnnouncementsContentHandler(_req: Request, res: Response, next: NextFunction) {
+  try {
+    await deleteAnnouncementsContent();
+    return res.status(204).send(); // No content
+  } catch (err) {
     return next(err);
   }
 }

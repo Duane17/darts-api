@@ -39,7 +39,7 @@ function fileFilter(_req: any, file: Express.Multer.File, cb: multer.FileFilterC
 export const uploadTeamLogo = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 3 * 1024 * 1024 }, // 3 MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 3 MB
 }).single("logo"); // field name: logo
 
 /**
