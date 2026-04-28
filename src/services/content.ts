@@ -1,12 +1,12 @@
 import { PrismaClient, PageKey } from "@prisma/client";
 import type { HomeContent, AboutContent, AnnouncementsContent } from "../dto/content.dto";
 import {
-  isHomeContent,
   isAboutContent,
   isAnnouncementsContent,
-  HomeContentSchema,
+  HomeContentInputSchema,
   AboutContentSchema,
-  AnnouncementsContentSchema
+  AnnouncementsContentSchema,
+  parseRawHomeContent,
 } from "../dto/content.dto";
 import { toUploadWebPath } from "../utils/uploads";
 
@@ -18,7 +18,7 @@ const prisma = new PrismaClient();
  */
 function normalizeHomeContentPaths(data: HomeContent): HomeContent {
   return {
-    heroBg: toUploadWebPath(data.heroBg),
+    heroBgs: data.heroBgs.map(toUploadWebPath),
     ctaBg: toUploadWebPath(data.ctaBg),
     programmes: data.programmes.map((p) => ({
       ...p,
@@ -70,8 +70,9 @@ async function getRawByPage(page: PageKey): Promise<unknown | null> {
 
 export async function getHomeContent(): Promise<HomeContent | null> {
   const raw = await getRawByPage(PageKey.HOME);
-  if (raw && isHomeContent(raw)) return raw;
-  return null;
+  if (!raw) return null;
+  // parseRawHomeContent handles both legacy { heroBg } and canonical { heroBgs }
+  return parseRawHomeContent(raw);
 }
 
 export async function getAboutContent(): Promise<AboutContent | null> {
@@ -82,10 +83,12 @@ export async function getAboutContent(): Promise<AboutContent | null> {
 
 /**
  * Upsert Home content after validating and normalizing its image paths.
+ * Accepts both the legacy { heroBg } shape and the new { heroBgs } array shape.
+ * Always persists in the canonical { heroBgs } format.
  * Throws ZodError for invalid input.
  */
 export async function upsertHomeContent(payload: unknown): Promise<HomeContent> {
-  const parsed = HomeContentSchema.parse(payload);
+  const parsed = HomeContentInputSchema.parse(payload);
   const normalized = normalizeHomeContentPaths(parsed);
 
   await prisma.siteContent.upsert({

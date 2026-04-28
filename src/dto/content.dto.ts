@@ -11,7 +11,8 @@ export type ProgrammeItem = {
 };
 
 export type HomeContent = {
-  heroBg: string;
+  /** Canonical field: 1–4 hero background images for the slideshow. */
+  heroBgs: string[];
   ctaBg: string;
   programmes: ProgrammeItem[];
 };
@@ -45,11 +46,78 @@ export const ProgrammeItemSchema = z.object({
   bgImage: z.string().min(1),
 });
 
+/**
+ * Validates the canonical stored format (heroBgs array).
+ * Used to verify records already persisted in the new shape.
+ */
 export const HomeContentSchema = z.object({
-  heroBg: z.string().min(1),
+  heroBgs: z.array(z.string().min(1)).min(1).max(4),
   ctaBg: z.string().min(1),
   programmes: z.array(ProgrammeItemSchema),
 });
+
+/**
+ * Accepts both the legacy single-image shape (`heroBg`) and the new
+ * multi-image shape (`heroBgs`). Always normalises to `heroBgs` on output.
+ *
+ * Priority: heroBgs (if provided and non-empty) → heroBg wrapped in array.
+ * Throws a ZodError if neither field yields at least one image.
+ */
+export const HomeContentInputSchema = z
+  .object({
+    /** Legacy single hero image – kept for backwards-compatible PUT requests. */
+    heroBg: z.string().min(1).optional(),
+    /** New multi-image array (1–4 entries). */
+    heroBgs: z.array(z.string().min(1)).min(1).max(4).optional(),
+    ctaBg: z.string().min(1),
+    programmes: z.array(ProgrammeItemSchema),
+  })
+  .transform(({ heroBg, heroBgs, ctaBg, programmes }) => {
+    const images = heroBgs?.length ? heroBgs : heroBg ? [heroBg] : [];
+    if (images.length === 0) {
+      throw new z.ZodError([
+        {
+          code: z.ZodIssueCode.custom,
+          path: ["heroBgs"],
+          message: "At least one hero background image is required.",
+        },
+      ]);
+    }
+    return { heroBgs: images, ctaBg, programmes };
+  });
+
+/** Output type produced by HomeContentInputSchema after transformation. */
+export type HomeContentInput = z.output<typeof HomeContentInputSchema>;
+
+/**
+ * Migrates a raw DB record to the canonical HomeContent shape.
+ * Handles both the legacy { heroBg } format and the new { heroBgs } format.
+ * Returns null if the record is unrecognisable.
+ */
+export function parseRawHomeContent(raw: unknown): HomeContent | null {
+  // New canonical format
+  const canonical = HomeContentSchema.safeParse(raw);
+  if (canonical.success) return canonical.data;
+
+  // Legacy format: { heroBg: string, ctaBg: string, programmes: [...] }
+  const legacy = z
+    .object({
+      heroBg: z.string().min(1),
+      ctaBg: z.string().min(1),
+      programmes: z.array(ProgrammeItemSchema),
+    })
+    .safeParse(raw);
+
+  if (legacy.success) {
+    return {
+      heroBgs: [legacy.data.heroBg],
+      ctaBg: legacy.data.ctaBg,
+      programmes: legacy.data.programmes,
+    };
+  }
+
+  return null;
+}
 
 export const AboutContentSchema = z.object({
   heroBg: z.string().min(1),
@@ -75,8 +143,7 @@ export const AboutContentSchema = z.object({
 
 // Type guards
 export function isHomeContent(x: unknown): x is HomeContent {
-  const res = HomeContentSchema.safeParse(x);
-  return res.success;
+  return HomeContentSchema.safeParse(x).success;
 }
 
 export function isAboutContent(x: unknown): x is AboutContent {
