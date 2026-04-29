@@ -42,7 +42,8 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Test route
 app.get("/healthz", (req, res) => {
@@ -58,6 +59,9 @@ app.use("/posts", postsRouter);
 app.use("/announcements", announcementsRouter);
 app.use("/leaders", leadersRouter);
 app.use("/uploads", uploadsRouter);
+
+
+app.use("/content", contentRouter);
 
 app.use(
   "/uploads",
@@ -82,7 +86,6 @@ app.use(
     },
   })
 );
-app.use("/content", contentRouter);
 
 
 
