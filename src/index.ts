@@ -15,6 +15,7 @@ import { announcementsRouter } from "./routes/announcements";
 import { leadersRouter } from "./routes/leaders.routes";
 import { contentRouter } from "./routes/content";
 import { uploadsRouter } from "./routes/uploads";
+import { requireAdmin } from "./middleware/auth";
 
 const app = express();
 
@@ -49,6 +50,14 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.get("/healthz", (req, res) => {
   res.json({ status: "ok" });
 });
+
+// Every write is admin-only, including routes added later. /auth stays open for login/register/logout;
+// self-registered users get EDITOR, so they can sign in but can't change anything until promoted.
+// Runs before the routers, so multer never writes an unauthenticated upload to disk.
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+app.use((req, res, next) =>
+  SAFE_METHODS.has(req.method) || req.path.startsWith("/auth/") ? next() : requireAdmin(req, res, next)
+);
 
 app.use("/auth", authRouter);
 app.use("/results", resultsRouter);
